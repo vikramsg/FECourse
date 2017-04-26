@@ -41,8 +41,8 @@ class readGMSH:
             if (int(temp[1]) == 1): numLineElements = numLineElements + 1
             if (int(temp[1]) == 3): numQuadElements = numQuadElements + 1
 
-        lineElements = np.zeros((numLineElements, 2))
-        quadElements = np.zeros((numQuadElements, 4))
+        lineElements = np.zeros((numLineElements, 2), dtype = int)
+        quadElements = np.zeros((numQuadElements, 4), dtype = int)
         lineCoun = 0
         quadCoun = 0
         for coun, i in enumerate(lines[it + 2: it + 2 + numElements]):
@@ -61,8 +61,7 @@ class readGMSH:
     def getConnectivity(self):
         mshNodes, lineElements, quadElements = self.read()
 
-        #I need to get numDOF, nodes and LM
-        #I get DOF by taking mshNodes and removing the ones that are in lineElements
+        numNodes    = mshNodes.shape[0]
 
         numEle      = quadElements.shape[0]
         numDOFNodes = mshNodes.shape[0] - np.unique(lineElements).shape[0]
@@ -73,7 +72,7 @@ class readGMSH:
             for j in range(4):
                 nodes[i, j, 0] = mshNodes[quadElements[i, j] - 1, 0]
                 nodes[i, j, 1] = mshNodes[quadElements[i, j] - 1, 1]
-
+        
         LM = quadElements     #For quad 
 
         for cn1, i in enumerate(LM):
@@ -81,9 +80,28 @@ class readGMSH:
                 for k in np.unique(lineElements):
                     if (j == k): LM[cn1, cn2] = 0
 
+        arr = np.unique(LM)
+
+        newDOF = np.zeros((numDOFNodes, 2)) #Associating olf DOFs with new DOFs
+
+        cn = 0
+        for i in arr:
+            if ( i != 0):
+                newDOF[cn, 0] = i 
+                newDOF[cn, 1] = cn + 1
+                cn            = cn + 1
+
+        #Renumber LM with new DOFs
+        for cn1, i in enumerate(LM):
+            for cn2, j in enumerate(i):
+                if (LM[cn1, cn2] != 0):
+                    for k in newDOF:
+                        if (LM[cn1, cn2] == k[0]):
+                            LM[cn1, cn2] = k[1]
+
         LM = LM - 1
 
-        print(LM)
+        return numEle, numNodes, numDOFNodes, nodes, LM 
 
 
 class testMesh:
@@ -251,6 +269,8 @@ class FE:
             self.getLocalStiffNess(i, K)
             self.getLocalMass(i, M)
 
+        print(M)
+
     def getLocalMass(self, elNo, M):
         numNodes = 4 #For quad 
         m = np.zeros((numNodes, numNodes))
@@ -327,17 +347,16 @@ class FE:
         l = np.zeros((2)) #For 1D
 
 if __name__=="__main__":
-    fileName                = 'test.msh'
-    msh                     = readGMSH(fileName)
-    msh.getConnectivity()
-#    LM                      = msh.getConnectivity()
-#
+    fileName                            = 'test.msh'
+    msh                                 = readGMSH(fileName)
+    numEle, numNodes, numDOF, nodes, LM = msh.getConnectivity()
+
 #    numEle = 8
 #
-#    msh                     = Mesh()
+#    msh                     = testMesh()
 #    nodes, numNodes, numDOF = msh.getMesh(numEle)
 #    LM                      = msh.getConnectivity()
 #
-#    kappa = 1.0
-#    run = FE(kappa, numEle, numNodes, numDOF, nodes, LM)
-#    run.build()
+    kappa = 1.0
+    run = FE(kappa, numEle, numNodes, numDOF, nodes, LM)
+    run.build()
