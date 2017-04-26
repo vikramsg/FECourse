@@ -104,152 +104,6 @@ class readGMSH:
         return numEle, numNodes, numDOFNodes, nodes, LM 
 
 
-class testMesh:
-
-    def __init__(self):
-        self.nodes    = None
-        self.numNodes = 0 
-        self.numEle   = 0 
-        self.numDOF   = 0 
-
-        self.LM       = None
-
-    def getConnectivity(self):
-        self.LM = np.zeros((self.numEle, 4), dtype=int) #For quad 
-
-        self.LM[0, 0] = -1 
-        self.LM[0, 1] = -1
-        self.LM[0, 2] =  1
-        self.LM[0, 3] =  0
-
-        self.LM[1, 0] = -1
-        self.LM[1, 1] = -1
-        self.LM[1, 2] = -1
-        self.LM[1, 3] =  1
-
-        self.LM[2, 0] =  0
-        self.LM[2, 1] =  1
-        self.LM[2, 2] =  3
-        self.LM[2, 3] =  2
-
-        self.LM[3, 0] =  1
-        self.LM[3, 1] = -1
-        self.LM[3, 2] = -1
-        self.LM[3, 3] =  3
-
-        self.LM[4, 0] =  2
-        self.LM[4, 1] =  3
-        self.LM[4, 2] =  5
-        self.LM[4, 3] =  4
-
-        self.LM[5, 0] =  3
-        self.LM[5, 1] = -1
-        self.LM[5, 2] =  6
-        self.LM[5, 3] =  5
-
-        self.LM[6, 0] = -1
-        self.LM[6, 1] = -1
-        self.LM[6, 2] =  7
-        self.LM[6, 3] =  6
-
-        self.LM[7, 0] = -1
-        self.LM[7, 1] = -1
-        self.LM[7, 2] = -1
-        self.LM[7, 3] =  7
-
-
-        return self.LM
-
-
-
-    def getMesh(self, numEle):
-        self.numEle = numEle
-
-        nodes = np.zeros((numEle, 4, 2))
-
-        nodes[0, 0, 0] = -0.0
-        nodes[0, 0, 1] =  0.0
-        nodes[0, 1, 0] =  1.00
-        nodes[0, 1, 1] =  0.0
-        nodes[0, 2, 0] =  1.00 
-        nodes[0, 2, 1] =  1.0
-        nodes[0, 3, 0] =  0.00 
-        nodes[0, 3, 1] =  1.0
-
-        nodes[1, 0, 0] =  1.0
-        nodes[1, 0, 1] =  0.0
-        nodes[1, 1, 0] =  2.00
-        nodes[1, 1, 1] =  0.0
-        nodes[1, 2, 0] =  2.00 
-        nodes[1, 2, 1] =  1.0
-        nodes[1, 3, 0] =  1.00 
-        nodes[1, 3, 1] =  1.0
-
-        nodes[2, 0, 0] =  0.0
-        nodes[2, 0, 1] =  1.0
-        nodes[2, 1, 0] =  1.00
-        nodes[2, 1, 1] =  1.0
-        nodes[2, 2, 0] =  1.00 
-        nodes[2, 2, 1] =  2.0
-        nodes[2, 3, 0] =  0.00 
-        nodes[2, 3, 1] =  2.0
-
-        nodes[3, 0, 0] =  1.0
-        nodes[3, 0, 1] =  1.0
-        nodes[3, 1, 0] =  2.00
-        nodes[3, 1, 1] =  1.0
-        nodes[3, 2, 0] =  2.00 
-        nodes[3, 2, 1] =  2.0
-        nodes[3, 3, 0] =  1.00 
-        nodes[3, 3, 1] =  2.0
-
-        nodes[4, 0, 0] =  0.0
-        nodes[4, 0, 1] =  2.0
-        nodes[4, 1, 0] =  1.00
-        nodes[4, 1, 1] =  2.0
-        nodes[4, 2, 0] =  1.00 
-        nodes[4, 2, 1] =  3.0
-        nodes[4, 3, 0] =  0.00 
-        nodes[4, 3, 1] =  3.0
-
-        nodes[5, 0, 0] =  1.0
-        nodes[5, 0, 1] =  2.0
-        nodes[5, 1, 0] =  2.00
-        nodes[5, 1, 1] =  2.0
-        nodes[5, 2, 0] =  2.00 
-        nodes[5, 2, 1] =  3.0
-        nodes[5, 3, 0] =  1.00 
-        nodes[5, 3, 1] =  3.0
-
-        nodes[6, 0, 0] =  2.0
-        nodes[6, 0, 1] =  2.0
-        nodes[6, 1, 0] =  3.00
-        nodes[6, 1, 1] =  2.0
-        nodes[6, 2, 0] =  3.00 
-        nodes[6, 2, 1] =  3.0
-        nodes[6, 3, 0] =  2.00 
-        nodes[6, 3, 1] =  3.0
-
-        nodes[7, 0, 0] =  3.0
-        nodes[7, 0, 1] =  2.0
-        nodes[7, 1, 0] =  4.00
-        nodes[7, 1, 1] =  2.0
-        nodes[7, 2, 0] =  4.00 
-        nodes[7, 2, 1] =  3.0
-        nodes[7, 3, 0] =  3.00 
-        nodes[7, 3, 1] =  3.0
-
-        numNodes = 16
-
-        numDOF   = 8
-
-        self.numNodes = numNodes
-        self.nodes    = nodes
-
-        self.numDOF   = numDOF  
-
-        return nodes, numNodes, numDOF
-
 class FE:
 
     def __init__(self, kappa, numEle, numNodes, numDOF, node, LM):
@@ -264,19 +118,24 @@ class FE:
     def build(self):
         K = np.zeros((self.numDOF, self.numDOF))
         M = np.zeros((self.numDOF, self.numDOF))
+        F = np.zeros((self.numDOF))
 
         for i in range(numEle):
             self.getLocalStiffNess(i, K)
             self.getLocalMass(i, M)
+            self.getLocalLoad(i, F)
 
-        print(M)
+        return K, F 
 
-    def getLocalMass(self, elNo, M):
+    def getLocalLoad(self, elNo, F):
         numNodes = 4 #For quad 
         m = np.zeros((numNodes, numNodes))
 
-        #Quad mass matrix 
+        #Crude way to calculate element dimension 
+        hx = (np.max(self.nodes[elNo, :, 0]) - np.min(self.nodes[elNo, :, 0]))
+        hy = (np.max(self.nodes[elNo, :, 1]) - np.min(self.nodes[elNo, :, 1]))
 
+        #Quad mass matrix 
         m[0, 0] = 4 
         m[0, 1] = 2 
         m[0, 2] = 1 
@@ -296,6 +155,47 @@ class FE:
         m[3, 1] = 1 
         m[3, 2] = 2 
         m[3, 3] = 4 
+
+        m = m*hx*hy/36.0
+
+        g = np.ones((numNodes)) #Assuming all loads are 1       
+        f = np.zeros((numNodes)) 
+        for i in range(numNodes):
+            for j in range(numNodes):
+                f[i] = f[i] + g[j]*m[i, j]
+
+        for i in range(numNodes):
+            ip = LM[elNo, i]
+            if (ip != -1):
+                    F[ip] = F[ip] + f[i]
+
+
+    def getLocalMass(self, elNo, M):
+        numNodes = 4 #For quad 
+        m = np.zeros((numNodes, numNodes))
+
+        #Quad mass matrix 
+        m[0, 0] = 4 
+        m[0, 1] = 2 
+        m[0, 2] = 1 
+        m[0, 3] = 2 
+
+        m[1, 0] = 2 
+        m[1, 1] = 4 
+        m[1, 2] = 2 
+        m[1, 3] = 1 
+
+        m[2, 0] = 1 
+        m[2, 1] = 2 
+        m[2, 2] = 4 
+        m[2, 3] = 2 
+
+        m[3, 0] = 2 
+        m[3, 1] = 1 
+        m[3, 2] = 2 
+        m[3, 3] = 4 
+
+        m = m/36.0
 
         for i in range(numNodes):
             ip = LM[elNo, i]
@@ -343,20 +243,13 @@ class FE:
                     K[ip, iq] = K[ip, iq] + k[m, n]
 
 
-    def getLocalLoad(self):
-        l = np.zeros((2)) #For 1D
-
 if __name__=="__main__":
-    fileName                            = 'test.msh'
+    fileName                            = 'test_quad.msh'
     msh                                 = readGMSH(fileName)
     numEle, numNodes, numDOF, nodes, LM = msh.getConnectivity()
 
-#    numEle = 8
-#
-#    msh                     = testMesh()
-#    nodes, numNodes, numDOF = msh.getMesh(numEle)
-#    LM                      = msh.getConnectivity()
-#
     kappa = 1.0
-    run = FE(kappa, numEle, numNodes, numDOF, nodes, LM)
-    run.build()
+    run   = FE(kappa, numEle, numNodes, numDOF, nodes, LM)
+    K, F  = run.build()
+
+    U     = np.linalg.solve(K, F)
