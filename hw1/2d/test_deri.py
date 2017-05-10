@@ -120,7 +120,7 @@ class readGMSH:
                 break
         numElements = int(lines[it + 1])
 
-        numLineElements = 0
+        numLineElements = 0 #Boundary nodes
         numTriElements  = 0
         for coun, i in enumerate(lines[it + 2: it + 2 + numElements]):
             temp     = i.split()
@@ -159,7 +159,9 @@ class readGMSH:
                 nodes[i, j, 0] = mshNodes[triElements[i, j] - 1, 0]
                 nodes[i, j, 1] = mshNodes[triElements[i, j] - 1, 1]
         
-        LM = triElements     #For triangle 
+        LM = triElements     #For triangle #It is not necessarily numbered from 0
+
+#        print(LM)
 
         for cn1, i in enumerate(LM):
             for cn2, j in enumerate(i):
@@ -193,7 +195,9 @@ class readGMSH:
 
 class FE:
 
-    def __init__(self, kappa, numEle, numNodes, numDOF, node, LM):
+    def __init__(self, kappa, case, numEle, numNodes, numDOF, node, LM):
+        self.eleNumNodes = 3 #For triangle
+
         self.kappa    = kappa
 
         self.numEle   = numEle
@@ -203,6 +207,8 @@ class FE:
 
         self.nodes    = nodes
         self.LM       = LM 
+
+        self.case     = case 
 
     def buildNonLinear(self, U):
         K = np.zeros((self.numDOF, self.numDOF))
@@ -216,11 +222,6 @@ class FE:
             det_D = self.assembleStiffness(i, U, K)
             self.assembleLoad(i, F, det_D) #Assuming uniform load of f = 1
             self.assembleG(i, U, G)
-            u_x, u_y = self.getDerivative(i, U)
-
-            for j in range(3):
-                jp = self.LM[i, j]
-#                print(self.nodes[i, j, 0], self.nodes[i, j, 1], U[jp], u_x, u_y)
 
         R = F - G
 
@@ -231,32 +232,23 @@ class FE:
         '''
         Get du/dx and du/dy
         '''
-        numNodes = 3 #For triangle 
+        numNodes = self.eleNumNodes 
 
         det_D, A = self.getTriShapeFnCoeff(elNo)
 
-#        print("Element ", elNo)
-
         u_x = 0.0; u_y = 0.0;
         for j in range(numNodes):
-#            print(j, self.nodes[elNo, j, 0], self.nodes[elNo, j, 1])
             jp = self.LM[elNo, j]
             if (jp != -1):
                 u_x = u_x + A[j, 1]*U[jp]
                 u_y = u_y + A[j, 2]*U[jp]
-#                print(jp, U[jp], A[j, 1], u_x)
-#                print(jp, U[jp], A[j, 2], u_y)
-
-#        print(A[:, 1], u_x)
-#        print(A[:, 2], u_y)
 
         return u_x, u_y
 
     def assembleG(self, elNo, U, G):
-        numNodes = 3 #For triangle 
+        numNodes = self.eleNumNodes 
 
-        #FIXME This gets the tangent stiffness not the local stiffness
-        det_D, k = self.getLocalStiffness(elNo, U)
+        det_D, k = self.getLocalK(elNo, U)
 
         g = np.zeros((numNodes)) #Element g
         for i in range(numNodes):
@@ -273,11 +265,11 @@ class FE:
 
 
     def assembleLoad(self, elNo, F, det_D):
-        numNodes = 3 #For triangle 
+        numNodes = self.eleNumNodes 
 
         m = self.getLocalMass(elNo, det_D)
 
-        g = np.ones((numNodes)) #Assuming all loads are 1       
+        g = 0.30*np.ones((numNodes)) #Assuming all loads are 1       
         f = np.zeros((numNodes)) 
         for i in range(numNodes):
             for j in range(numNodes):
@@ -288,8 +280,9 @@ class FE:
             if (ip != -1):
                     F[ip] = F[ip] + f[i]
 
+
     def assembleStiffness(self, elNo, U, K):
-        numNodes = 3 #For triangle 
+        numNodes = self.eleNumNodes 
 
         det_D, k = self.getLocalStiffness(elNo, U)
 
@@ -303,9 +296,24 @@ class FE:
         return det_D
 
 
+    def getLocalK(self, elNo, U):
+        numNodes = self.eleNumNodes 
+        k = np.zeros((numNodes, numNodes)) 
+
+        det_D, A = self.getTriShapeFnCoeff(elNo)
+
+        kappa = self.getKappa(elNo, U)
+
+        for m in range(numNodes):
+            for n in range(numNodes):
+                k[m, n] = kappa*0.5*det_D*(A[m, 1]*A[n, 1] + A[m, 2]*A[n, 2])
+
+        return det_D, k
+
+
 
     def getLocalMass(self, elNo, det_D):
-        numNodes = 3 #For triangle 
+        numNodes = self.eleNumNodes 
         m = np.zeros((numNodes, numNodes))
 
         #Triangle mass matrix 
@@ -330,7 +338,7 @@ class FE:
         '''
         Get the A matrix for triangle linear shape function
         '''
-        numNodes = 3 #For triangle
+        numNodes = self.eleNumNodes 
 
         #Triangle stiffness calculation
         D = np.zeros((numNodes, numNodes)) 
@@ -355,9 +363,6 @@ class FE:
         A[2, 1] = (self.nodes[elNo, 0, 1] - self.nodes[elNo, 1, 1])/det_D
         A[2, 2] = (self.nodes[elNo, 1, 0] - self.nodes[elNo, 0, 0])/det_D
 
-#        print(A[:, 2])
-#        print(A)
-
         return det_D, A
 
 
@@ -370,14 +375,22 @@ class FE:
         3. kappa = kappa_0*(A*|grad u|**4 + B*|grad u|**2 + 1)
         '''
 
-        kappa = self.kappa/(1 + u_x**2 + u_y**2)
-
-#        print(elNo, kappa)
+        if (self.case == 1):
+            kappa = self.kappa
+        elif (self.case == 2):
+            kappa = self.kappa/(1 + u_x**2 + u_y**2)
+        elif (self.case == 3):
+            A =  0.18
+            B = -0.82
+            l1_gradu = np.sqrt(u_x**2 + u_y**2)
+            kappa    = self.kappa*(A*l1_gradu**4 + B*l1_gradu**2 + 1)
 
         return kappa
 
+
     def getLocalStiffness(self, elNo, U):
-        numNodes = 3 #For triangle
+        numNodes = self.eleNumNodes
+
         k = np.zeros((numNodes, numNodes)) 
 
         det_D, A = self.getTriShapeFnCoeff(elNo)
@@ -386,22 +399,36 @@ class FE:
 
         u_x, u_y = self.getDerivative(elNo, U)
         
+        det_D, k = self.getLocalK(elNo, U)
+
         for m in range(numNodes):
             for n in range(numNodes):
-                k[m, n] = kappa*0.5*det_D*(A[m, 1]*A[n, 1] + A[m, 2]*A[n, 2])
+                if (self.case == 2):
+                    dk_dux  = -2*self.kappa*u_x/(1 + u_x**2 + u_y**2) #dk/du_x
+                    dk_duy  = -2*self.kappa*u_y/(1 + u_x**2 + u_y**2)
+                    dux_ddb = A[n, 1] #du_x/d d_b = A_b2
+                    duy_ddb = A[n, 2] #du_x/d d_b = A_b3
+                    for p in range(numNodes):
+                        jp      = self.LM[elNo, p]
+                        if (jp != -1): #U = 0 for boundary
+                            d_c     = U[jp]
+                            k_ac    = 0.5*det_D*(A[m, 1]*A[p, 1] + A[m, 2]*A[p, 2])
+                            k[m, n] = k[m, n] + d_c*k_ac*(dk_dux*dux_ddb + dk_duy*duy_ddb)
+                            
+                elif (self.case == 3):
+                    A_k =  0.18
+                    B_k = -0.82
 
-                dk_dux  = -2*self.kappa*u_x/(1 + u_x**2 + u_y**2) #dk/du_x
-                dk_duy  = -2*self.kappa*u_y/(1 + u_x**2 + u_y**2)
-                dux_ddb = A[n, 1] #du_x/d d_b = A_b2
-                duy_ddb = A[n, 2] #du_x/d d_b = A_b3
-
-                for p in range(numNodes):
-                    jp      = self.LM[elNo, p]
-                    if (jp != -1): #U = 0 for boundary
-                        d_c     = U[jp]
-                        
-                        k_ac    = 0.5*det_D*(A[m, 1]*A[p, 1] + A[m, 2]*A[p, 2])
-                        k[m, n] = k[m, n] + d_c*k_ac*(dk_dux*dux_ddb + dk_duy*duy_ddb)
+                    dk_dux  = self.kappa*(2*B_k*u_x + A_k*(4*u_x**3 + 4*u_x*u_y**2)) #dk/du_x
+                    dk_duy  = self.kappa*(2*B_k*u_y + A_k*(4*u_y**3 + 4*u_y*u_x**2)) #dk/du_y
+                    dux_ddb = A[n, 1] #du_x/d d_b = A_b2
+                    duy_ddb = A[n, 2] #du_x/d d_b = A_b3
+                    for p in range(numNodes):
+                        jp      = self.LM[elNo, p]
+                        if (jp != -1): #U = 0 for boundary
+                            d_c     = U[jp]
+                            k_ac    = 0.5*det_D*(A[m, 1]*A[p, 1] + A[m, 2]*A[p, 2])
+                            k[m, n] = k[m, n] + d_c*k_ac*(dk_dux*dux_ddb + dk_duy*duy_ddb)
 
         return det_D, k
 
@@ -418,7 +445,6 @@ class FE:
                 jp    = self.LM[i, j]
                 if (jp != -1):
                     U[jp] = fn(x)
-#                    print(jp, x[1], U[jp])
 
 
 def fn(x):
@@ -426,10 +452,54 @@ def fn(x):
 
     return u
 
+class Post_process:
+
+    def __init__(self, fileName):
+        self.fileName = fileName
+
+    def write(self, outFile, DOF_connectivity, data, pointSize):
+        '''
+        Write data to the post processing file
+        pointSize is the the number of points in the mesh
+        boundary points will have 0 written
+        '''
+        rd = open(self.fileName, 'r')
+        wr = open(outFile, 'w')
+
+        for i in rd:
+            wr.write(i)
+
+        size = data.shape[0]
+
+        wr.write('\nPOINT_DATA ' + str(pointSize) + '\n')
+
+        wr.write('\nSCALARS data float 1 \nLOOKUP_TABLE default \n \n')
+
+        counter = 0
+        for i in range(pointSize):
+            '''
+            DOF_connectivity is sorted in ascending order
+            So we go through the connectivity, get the first free DOF put in the value
+            and so on. For closed DOF we simply print 0
+            '''
+            if (DOF_connectivity[counter, 0] - 1 == i ): #i starts from 0
+                index = DOF_connectivity[counter, 1] - 1
+                st = str(U[index] ) + '\n'
+                counter = counter + 1
+            else:
+                st = '0 \n'
+
+            wr.write(st)
+
+
+        rd.close()
+        wr.close()
+
+
 
 if __name__=="__main__":
-    fileName                                    = 'old/test_tri.msh'
-#    fileName                                    = 'old/refined_tri.msh'
+#    fileName                                    = 'old/test_tri.msh'
+    fileName                                    = 'proj_test.msh'
     msh                                         = readGMSH(fileName)
 #    msh                                         = Mesh()
     numEle, numNodes, numDOF, nodes, LM, newDOF = msh.getConnectivity()
@@ -437,20 +507,40 @@ if __name__=="__main__":
     tol    = 1e-10 #Tolerance
 
     kappa  = 1.0
-    run    = FE(kappa, numEle, numNodes, numDOF, nodes, LM)
+    case   = 3
+    '''
+    1. kappa = kappa_0
+    2. kappa = kappa_0/(1 + u_x**2 + u_y**2)
+    3. kappa = kappa_0*(A*|grad u|**4 + B*|grad u|**2 + 1)
+    '''
+
+    run    = FE(kappa, case, numEle, numNodes, numDOF, nodes, LM)
 
     U      = np.zeros((numDOF)) #Solution vector
     
-#    run.project(fn, U)
-
-    for i in range(1):
+    for i in range(50):
         R, K   = run.buildNonLinear(U)
         
         deltaD = np.linalg.solve(K, R)
         
         U      = U + deltaD
 
-    for i, l in enumerate(newDOF):
-#        print(l[0], U[i])
-        print(msh.mshNodes[l[0] - 1][0], msh.mshNodes[l[0] - 1][1], U[i])
+        normD  = np.linalg.norm(deltaD)
 
+        if (normD < tol):# FIXME Not all conditions have been included
+            break
+
+        print("iteration ", i, ", norm ", normD)
+
+    for i, l in enumerate(newDOF):
+#        print(l[0], l[1])
+        print(l[0], U[i])
+#        print(msh.mshNodes[l[0] - 1][0], msh.mshNodes[l[0] - 1][1], U[i])
+
+    
+#    postFile                                    = 'old/test_tri.vtk'
+    postFile                                    = 'proj_test.vtk'
+    outFile                                     = 'post_tri.vtk'
+
+    post = Post_process(postFile)
+    post.write(outFile, newDOF, U, numNodes)
