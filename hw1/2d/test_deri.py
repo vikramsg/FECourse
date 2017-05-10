@@ -2,87 +2,6 @@ import numpy as np
 import re
 
 
-class Mesh:
-
-    def __init__(self):
-        self.nodes    = None
-        self.numNodes = 0 
-        self.numEle   = 0 
-
-        self.LM       = None
-
-    def getConnectivity(self):
-        self.numEle = 4
-        self.getMesh(self.numEle)
-
-        self.LM = np.zeros((self.numEle, 3)) #For triangle
-
-        self.LM[0, 0] = 0
-        self.LM[0, 1] = 1
-        self.LM[0, 2] = 2
-
-        self.LM[1, 0] = 4
-        self.LM[1, 1] = 2
-        self.LM[1, 2] = 1
-
-        self.LM[2, 0] = 1
-        self.LM[2, 1] = 3
-        self.LM[2, 2] = 4
-
-        self.LM[3, 0] = 2
-        self.LM[3, 1] = 4
-        self.LM[3, 2] = 5
-
-        newDOF = np.zeros((self.numNodes, 2), dtype = int) #Associating olf DOFs with new DOFs
-        for i, j in enumerate(newDOF):
-            newDOF[i, 0] = i
-            newDOF[i, 1] = i
-
-        return self.numEle, self.numNodes, self.numNodes, self.nodes, self.LM, newDOF
-
-
-
-    def getMesh(self, numEle):
-        self.numEle = numEle
-
-        nodes = np.zeros((numEle, 3, 2))
-
-        nodes[0, 0, 0] = -1.5
-        nodes[0, 0, 1] =  0.0
-        nodes[0, 1, 0] = -0.75
-        nodes[0, 1, 1] =  0.0
-        nodes[0, 2, 0] = -0.75 
-        nodes[0, 2, 1] =  0.5
-
-        nodes[1, 0, 0] = -0.0
-        nodes[1, 0, 1] =  0.5
-        nodes[1, 1, 0] = -0.75
-        nodes[1, 1, 1] =  0.5
-        nodes[1, 2, 0] = -0.75 
-        nodes[1, 2, 1] =  0.0
-
-        nodes[2, 0, 0] = -0.75
-        nodes[2, 0, 1] =  0.0
-        nodes[2, 1, 0] = -0.00
-        nodes[2, 1, 1] =  0.0
-        nodes[2, 2, 0] = -0.00 
-        nodes[2, 2, 1] =  0.5
-
-        nodes[3, 0, 0] = -0.75
-        nodes[3, 0, 1] =  0.5
-        nodes[3, 1, 0] = -0.00
-        nodes[3, 1, 1] =  0.5
-        nodes[3, 2, 0] = -0.00 
-        nodes[3, 2, 1] =  1.0
-
-        numNodes = 6
-
-        self.numNodes = numNodes
-        self.nodes    = nodes
-
-        return nodes, numNodes
-
-
 class readGMSH:
 
     def __init__(self, fileName):
@@ -198,19 +117,24 @@ class FE:
     def __init__(self, kappa, case, numEle, numNodes, numDOF, node, LM):
         self.eleNumNodes = 3 #For triangle
 
-        self.kappa    = kappa
+        self.kappa       = kappa
 
-        self.numEle   = numEle
-        self.numDOF   = numDOF
+        self.numEle      = numEle
+        self.numDOF      = numDOF
 
-        self.numNodes = numNodes
+        self.numNodes    = numNodes
 
-        self.nodes    = nodes
-        self.LM       = LM 
+        self.nodes       = nodes
+        self.LM          = LM 
 
-        self.case     = case 
+        self.case        = case 
 
-    def buildNonLinear(self, U):
+        self.load_coef   = 1.0
+
+
+    def buildNonLinear(self, U, load_coef):
+        self.load_coef = load_coef
+
         K = np.zeros((self.numDOF, self.numDOF))
 
         F = np.zeros((self.numDOF))
@@ -227,7 +151,8 @@ class FE:
 
         return R, K
 
- 
+
+
     def getDerivative(self, elNo, U):
         '''
         Get du/dx and du/dy
@@ -269,7 +194,7 @@ class FE:
 
         m = self.getLocalMass(elNo, det_D)
 
-        g = 0.30*np.ones((numNodes)) #Assuming all loads are 1       
+        g = 0.300*np.ones((numNodes))*self.load_coef #Assuming uniform loading 
         f = np.zeros((numNodes)) 
         for i in range(numNodes):
             for j in range(numNodes):
@@ -498,39 +423,76 @@ class Post_process:
 
 
 if __name__=="__main__":
-#    fileName                                    = 'old/test_tri.msh'
+#    fileName                                    = 'test/ref_proj.msh'
     fileName                                    = 'proj_test.msh'
     msh                                         = readGMSH(fileName)
-#    msh                                         = Mesh()
     numEle, numNodes, numDOF, nodes, LM, newDOF = msh.getConnectivity()
 
-    tol    = 1e-10 #Tolerance
+    tol    = 1e-8 #Tolerance
 
-    kappa  = 1.0
-    case   = 3
+    kappa        = 1.0
+    kappa_case   = 3
     '''
     1. kappa = kappa_0
     2. kappa = kappa_0/(1 + u_x**2 + u_y**2)
     3. kappa = kappa_0*(A*|grad u|**4 + B*|grad u|**2 + 1)
     '''
 
-    run    = FE(kappa, case, numEle, numNodes, numDOF, nodes, LM)
+    run    = FE(kappa, kappa_case, numEle, numNodes, numDOF, nodes, LM)
 
     U      = np.zeros((numDOF)) #Solution vector
-    
-    for i in range(50):
-        R, K   = run.buildNonLinear(U)
-        
+
+    newton_case = 2
+    '''
+    1. Newton 
+    2. Modified Newton 
+    '''
+
+    inc_case    = 1
+    '''
+    1. No incremental loading
+    2. Incremental loading with 10 steps
+    '''
+
+    num_increments = 10
+
+    if (inc_case == 1):
+        load_coef   = 1.0 #For incremental loading
+    elif (inc_case == 2):
+        load_coef   = 1.0/num_increments #For incremental loading
+
+    R, K   = run.buildNonLinear(U, load_coef)
+    for i in range(100):
         deltaD = np.linalg.solve(K, R)
         
         U      = U + deltaD
-
+        
         normD  = np.linalg.norm(deltaD)
 
-        if (normD < tol):# FIXME Not all conditions have been included
+        print("iteration ", i, ", norm ", normD)
+
+        if ((normD < tol) and (np.abs(load_coef - 1) < tol)):# FIXME Not all conditions have been included
+            '''
+            1. increment should be within tolerance
+            2. incremental loading steps must finish
+            '''
             break
 
-        print("iteration ", i, ", norm ", normD)
+        if (inc_case == 2):
+            if (i <= num_increments):
+                load_coef = i*(1.0/num_increments)
+
+
+        if (newton_case == 1):
+            R, K       = run.buildNonLinear(U, load_coef)
+
+        elif (newton_case == 2):
+            if (inc_case == 2) and (np.abs(load_coef) < (1 - tol)): #Incremental loading requires K calculations at each increment
+                R, K       = run.buildNonLinear(U, load_coef)
+            else:
+                R, K_temp  = run.buildNonLinear(U, load_coef)
+
+
 
     for i, l in enumerate(newDOF):
 #        print(l[0], l[1])
@@ -538,7 +500,7 @@ if __name__=="__main__":
 #        print(msh.mshNodes[l[0] - 1][0], msh.mshNodes[l[0] - 1][1], U[i])
 
     
-#    postFile                                    = 'old/test_tri.vtk'
+#    postFile                                    = 'test/ref_proj.vtk'
     postFile                                    = 'proj_test.vtk'
     outFile                                     = 'post_tri.vtk'
 
