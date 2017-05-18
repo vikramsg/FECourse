@@ -1,0 +1,53 @@
+base     = 'post_tri_'
+suffix   = '3_2_2'
+filename = base + suffix + '.vtk' 
+
+OpenDatabase('./refined/' + filename )
+
+
+DeleteAllPlots()
+AddPlot("Pseudocolor", "u")
+DrawPlots()
+
+p = PseudocolorAttributes()
+p.colorTableName = "gray"
+#print p
+SetPlotOptions(p)
+
+plotName = GetPlotList().GetPlots(0).plotName
+legend = GetAnnotationObject(plotName)
+
+legend.xScale = 2.5
+legend.yScale = 0.25
+
+legend.orientation = legend.HorizontalBottom
+
+legend.managePosition = 0
+legend.position = (0.25, 0.55)
+
+legend.drawLabels = 1
+legend.drawMinMax = 0
+legend.drawTitle = 0
+
+legend.fontHeight = 0.05
+
+#print legend
+
+AddPlot("Contour", "u")
+DrawPlots()
+
+p = ContourAttributes()
+p.colorTableName = "xray"
+#print p
+SetPlotOptions(p)
+
+
+s = SaveWindowAttributes()
+s.format = s.PNG
+s.fileName = "visit_" + suffix
+s.width, s.height = 1024,768
+s.quality= 100
+s.screenCapture = 0
+SetSaveWindowAttributes(s)
+SaveWindow()
+
