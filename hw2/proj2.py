@@ -92,7 +92,7 @@ class readGMSH:
             for j in range(3):
                 nodes[i, j, 0] = mshNodes[triElements[i, j] - 1, 0]
                 nodes[i, j, 1] = mshNodes[triElements[i, j] - 1, 1]
-        
+
         LM = triElements     #For triangle 
 
         #Associate boundary nodes with 0
@@ -131,13 +131,17 @@ class FE:
     Class for building matrices and vectors required for the problem
     '''
 
-    def __init__(self, kappa, case, numEle, numNodes, numDOF, nodes, LM):
+    def __init__(self, kappa, rho_c, numEle, numNodes, numDOF, nodes, LM):
         '''
         Initialize variables
         '''
         self.eleNumNodes = 3        #For triangle
 
+        alpha            = None
+        dt               = None
+
         self.kappa       = kappa    #k_0
+        self.rho_c       = rho_c    #rho*c
 
         self.numEle      = numEle   #Number of elements
         self.numDOF      = numDOF   #Number of open DOF
@@ -147,42 +151,39 @@ class FE:
         self.nodes       = nodes    #Array containing x, y co-ordinates of nodes in each element
         self.LM          = LM       #LM array 
 
-        self.case        = case     #k_0 case
+        self.load_case   = None     #Default load
 
-        self.load_coef   = 1.0      #Default load
+        self.pTime       = None     #Time at the present time step
+
+    def problem_param(self, alpha, dt, load_case):
+        self.alpha          = alpha
+        self.dt             = dt
+        self.load_case      = load_case
 
 
-    def buildNonLinear(self, U, load_coef):
+    def buildGTFE(self, U, pTime):
         '''
-        Build non-linear matrices
+        Build Mstar and F 
         '''
-        self.load_coef = load_coef
+        self.pTime          = pTime
+        
+        F     = np.zeros((self.numDOF))
 
-        #Initialize vectors and matrices
-        K = np.zeros((self.numDOF, self.numDOF))
+        alpha = self.alpha
 
-        F = np.zeros((self.numDOF))
-        R = np.zeros((self.numDOF))
-
-        G = np.zeros((self.numDOF))
+        tol   = 10e-8
+        if (np.abs(alpha - 0) > tol):
+            Mstar = np.zeros((self.numDOF, self.numDOF))
+        else:
+            Mstar = np.zeros((self.numDOF))
 
         for i in range(self.numEle):
-            det_D = self.assembleStiffness(i, U, K) #Assemble tangent stiffness matrix
-            self.assembleLoad(i, F, det_D)          #Assemble load vector
-            self.assembleG(i, U, G)                 #Assemble G vector 
+            det_D, k = self.getLocalK(i, U)      #Assemble tangent stiffness matrix
+            self.assembleMStar(i, det_D, U, Mstar)
+            self.assembleLoad(i, det_D, U, F)    #Assemble load vector
 
-        R = F - G
+        return Mstar, F 
 
-        return R, F, K
-
-    def assembleKappa(self, U):
-        '''
-        Assemble kappa for each element. For post-processing
-        '''
-        Kappa = np.zeros(self.numEle)
-        for i in range(self.numEle):
-            Kappa[i] = self.getKappa(i, U)
-        return Kappa 
 
     def assembleDerivative(self, U):
         '''
@@ -214,41 +215,88 @@ class FE:
 
         return u_x, u_y
 
-    def assembleG(self, elNo, U, G):
+
+
+    def assembleMStar(self, elNo, det_D, U, M):
         '''
-        Assemble G from each element g
+        Assemble M from each element g
         '''
         numNodes = self.eleNumNodes 
+    
+        alpha    = self.alpha
+        dt       = self.dt
+
+        rho_c    = self.rho_c
+
+        if (np.abs(alpha - 0) > tol):
+            m        = self.getLocalMass(elNo, det_D)
+        else:
+            m        = self.getLumpedMass(elNo, det_D)
 
         det_D, k = self.getLocalK(elNo, U)
 
-        g = np.zeros((numNodes)) #Element g
-        for i in range(numNodes):
-            for j in range(numNodes):
-                jp = LM[elNo, j]
-                #Need to multiply with load at the point so U[LM(a, j)]
-                if (jp != -1):
-                    g[i] = g[i] + U[jp]*k[i, j]
-
         for i in range(numNodes):
             ip = LM[elNo, i]
-            if (ip != -1):
-                    G[ip] = G[ip] + g[i]
+            if (np.abs(alpha - 0) > tol):
+                for j in range(numNodes ):
+                    iq = LM[elNo, j]
+                    if (ip != -1) and (iq != -1):
+                        M[ip, iq] = M[ip, iq] + (rho_c*m[i, j] + alpha*dt*k[i, j])
+            else:
+                if (ip != -1):
+                    M[ip] = M[ip] + rho_c*m[i] 
 
 
-    def assembleLoad(self, elNo, F, det_D):
+
+    def assembleLoad(self, elNo, det_D, U, F):
         '''
         Assemble load from each element load
         '''
         numNodes = self.eleNumNodes 
 
-        m = self.getLocalMass(elNo, det_D)
+        alpha    = self.alpha
+        t        = self.pTime
+        dt       = self.dt
 
-        g = np.ones((numNodes))*self.load_coef #Assuming uniform loading 
-        f = np.zeros((numNodes)) 
+        rho_c    = self.rho_c
+
+        tol   = 10e-8
+
+        '''
+        If alpha == 0, use lumped mass matrix 
+        '''
+        if (np.abs(alpha - 0) > tol):
+            m        = self.getLocalMass(elNo, det_D)
+        else:
+            m        = self.getLumpedMass(elNo, det_D)
+
+        det_D, k = self.getLocalK(elNo, U)
+
+        '''
+        Create element load vector
+        '''
+        f = np.zeros(numNodes)
+        g = np.zeros(numNodes)
+        for i in range(numNodes):
+            g[i] = self.getGTLoad(t, dt)
+        if (np.abs(alpha - 0) > tol):
+            f = np.dot(m, g) # f = f_b*m_ab 
+        else:
+            for i in range(numNodes):
+                f[i] = g[i]*m[i]
+
         for i in range(numNodes):
             for j in range(numNodes):
-                f[i] = f[i] + g[j]*m[i, j]
+                jp = LM[elNo, j]
+                if (jp != -1):
+                    if (np.abs(alpha - 0) > tol):
+                        f[i] = f[i] + (rho_c*m[i, j] - (1 - alpha)*dt*k[i, j]) * U[jp]
+                    else:
+                        if (i == j):
+                            m_mass = m[i]
+                        else:
+                            m_mass = 0 
+                        f[i] = f[i] + (rho_c*m_mass - (1 - alpha)*dt*k[i, j]) * U[jp]
 
         for i in range(numNodes):
             ip = LM[elNo, i]
@@ -256,22 +304,27 @@ class FE:
                     F[ip] = F[ip] + f[i]
 
 
-    def assembleStiffness(self, elNo, U, K):
+    def getGTLoad(self, t, dt):
         '''
-        Assemble K from each element k
+        alpha*F_{n + 1} + (1 - alpha)*F_n
         '''
-        numNodes = self.eleNumNodes 
+        alpha = self.alpha
 
-        det_D, k = self.getLocalStiffness(elNo, U)
+        f_np1 = self.getUnsteadyLoad(t + dt)
+        f_n   = self.getUnsteadyLoad(t)
 
-        for m in range(numNodes):
-            ip = LM[elNo, m]
-            for n in range(numNodes ):
-                iq = LM[elNo, n]
-                if (ip != -1) and (iq != -1):
-                    K[ip, iq] = K[ip, iq] + k[m, n]
+        return alpha*f_np1 + (1 - alpha)*f_n
 
-        return det_D
+    def getUnsteadyLoad(self, t):
+        load_case = self.load_case 
+        if self.load_case == 1: 
+            f_0 = 2.6*(10**4)
+            T   = 300.0
+            f   = np.max([0, f_0*np.sin(2*np.pi*t/T)])
+        else:
+            f = 0
+
+        return f
 
 
     def getLocalK(self, elNo, U):
@@ -292,6 +345,21 @@ class FE:
         return det_D, k
 
 
+    def getLumpedMass(self, elNo, det_D):
+        '''
+        Get generic mass matrix for element
+        '''
+        numNodes = self.eleNumNodes 
+        m = np.zeros((numNodes))
+
+        #Triangle Lumped mass matrix 
+        m[0] = 4 
+        m[1] = 4 
+        m[2] = 4 
+
+        m = m*(det_D/24.0)
+
+        return m
 
     def getLocalMass(self, elNo, det_D):
         '''
@@ -351,74 +419,9 @@ class FE:
 
 
     def getKappa(self, elNo, U):
-        u_x, u_y = self.getDerivative(elNo, U)
-
-        '''
-        1. kappa = kappa_0
-        2. kappa = kappa_0/(1 + u_x**2 + u_y**2)
-        3. kappa = kappa_0*(A*|grad u|**4 + B*|grad u|**2 + 1)
-        '''
-
-        if (self.case == 1):
-            kappa = self.kappa
-        elif (self.case == 2):
-            kappa = self.kappa/(1 + u_x**2 + u_y**2)
-        elif (self.case == 3):
-            A =  0.18
-            B = -0.82
-            l1_gradu = np.sqrt(u_x**2 + u_y**2)
-            kappa    = self.kappa*(A*(l1_gradu**4) + B*(l1_gradu**2) + 1)
+        kappa = self.kappa
 
         return kappa
-
-
-    def getLocalStiffness(self, elNo, U):
-        '''
-        At each element, calculate the non-linear part of the tangent stiffness
-        and add to the linear part
-        '''
-        numNodes = self.eleNumNodes
-
-        k = np.zeros((numNodes, numNodes)) 
-
-        det_D, A = self.getTriShapeFnCoeff(elNo)
-
-        kappa = self.getKappa(elNo, U)
-
-        u_x, u_y = self.getDerivative(elNo, U)
-        
-        det_D, k = self.getLocalK(elNo, U) #Get linear part of k
-
-        for m in range(numNodes):
-            for n in range(numNodes):
-                if (self.case == 2):
-                    dk_dux  = -2*self.kappa*u_x/(1 + u_x**2 + u_y**2)**2 #dk/du_x
-                    dk_duy  = -2*self.kappa*u_y/(1 + u_x**2 + u_y**2)**2
-                    dux_ddb = A[n, 1] #du_x/d d_b = A_b2
-                    duy_ddb = A[n, 2] #du_x/d d_b = A_b3
-                    for p in range(numNodes):
-                        jp      = self.LM[elNo, p]
-                        if (jp != -1): #U = 0 for boundary
-                            d_c     = U[jp]
-                            k_ac    = 0.5*det_D*(A[m, 1]*A[p, 1] + A[m, 2]*A[p, 2])
-                            k[m, n] = k[m, n] + d_c*k_ac*(dk_dux*dux_ddb + dk_duy*duy_ddb)
-                            
-                elif (self.case == 3):
-                    A_k =  0.18
-                    B_k = -0.82
-
-                    dk_dux  = self.kappa*(2*B_k*u_x + A_k*(4*u_x**3 + 4*u_x*u_y**2)) #dk/du_x
-                    dk_duy  = self.kappa*(2*B_k*u_y + A_k*(4*u_y**3 + 4*u_y*u_x**2)) #dk/du_y
-                    dux_ddb = A[n, 1] #du_x/d d_b = A_b2
-                    duy_ddb = A[n, 2] #du_x/d d_b = A_b3
-                    for p in range(numNodes):
-                        jp      = self.LM[elNo, p]
-                        if (jp != -1): #U = 0 for boundary
-                            d_c     = U[jp]
-                            k_ac    = 0.5*det_D*(A[m, 1]*A[p, 1] + A[m, 2]*A[p, 2])
-                            k[m, n] = k[m, n] + d_c*k_ac*(dk_dux*dux_ddb + dk_duy*duy_ddb)
-
-        return det_D, k
 
 
     def project(self, fn, U):
@@ -436,7 +439,7 @@ class FE:
 
 
 def fn(x):
-    u = np.cos(0.5*x[1])
+    u = 100.0 
 
     return u
 
@@ -508,139 +511,66 @@ class Post_process:
 
 
 if __name__=="__main__":
+#    fileName                                    = 'proj_test.msh'
     fileName                                    = 'ref_proj.msh'
     msh                                         = readGMSH(fileName)
     numEle, numNodes, numDOF, nodes, LM, newDOF = msh.getConnectivity()
 
+
+    u_b_file  = "data_at_b_gf.dat" # Write data at point B and a point near GF
+    wt_b_file = open(u_b_file, 'w')
+
     tol    = 1e-8 #Tolerance
 
-    kappa        = 1.0 #kappa_0
-    kappa_case   = 3
-    '''
-    1. kappa = kappa_0
-    2. kappa = kappa_0/(1 + u_x**2 + u_y**2)
-    3. kappa = kappa_0*(A*|grad u|**4 + B*|grad u|**2 + 1)
-    '''
+    kappa  = 250.0 #kappa_0
+    rho_c  = 1.76*10**(6)
+    run    = FE(kappa, rho_c, numEle, numNodes, numDOF, nodes, LM)
 
-    run    = FE(kappa, kappa_case, numEle, numNodes, numDOF, nodes, LM)
-
-    U      = np.zeros((numDOF)) #Solution vector initialized to 0
-
-    newton_case = 1
+    load_case = 1
     '''
-    1. Newton 
-    2. Modified Newton 
+    0: No load
+    1: Unsteady load f = max{0, f_0.sin(2.pi.t/T)}
     '''
 
-    inc_case    = 1
-    '''
-    1. No incremental loading
-    2. Incremental loading with 10 steps
-    '''
-    if (inc_case == 2):
-        num_increments = 10
-    elif (inc_case == 1):
-        num_increments = 1 
+    alpha =  1.0 
+    dt    =  1.0
+    run.problem_param(alpha, dt, load_case) #Set problem parameters
 
-    load = 0.1940 #f_0
+    U      = np.zeros((numDOF))    #Solution vector initialized to 0
 
-    if (inc_case == 1):
-        load_coef   = load #For incremental loading
-    elif (inc_case == 2):
-        load_coef   = load/num_increments #For incremental loading
-
-    u_vs_load = np.zeros((num_increments, 2)) #For plotting U at a particular node vs load
-
-    iterR = [] #List containing norm of R for each iteration
+    run.project(fn, U)
 
     startTime = time.time() # To measure time required for convergence
-    for j in range(1, num_increments + 1):
-        load_coef = j*(load/num_increments)
-            
-        print("load increment iteration ", j, ", load_coef ", load_coef, " norm(U) ", np.linalg.norm(U))
 
-        I_rc = 3 #Convergence flag
+    pTime = 0    #Physical time
+    U0    = U
+    for i in range(2):
+        Mstar, F = run.buildGTFE(U0, pTime)
 
-        R, F, K   = run.buildNonLinear(U, load_coef)
-        for i in range(500):
-            deltaD = np.linalg.solve(K, R)
-            
-            U      = U + deltaD
-            
-            normU  = np.linalg.norm(U)
+        if (np.abs(alpha - 0) > tol):
+            U1 = np.linalg.solve(Mstar, F)
+        else:
+            U1 = F/Mstar
 
-            normD  = np.linalg.norm(deltaD)
+        U0 = U1
 
-            if (normD/normU < tol) :
-                '''
-                1. increment should be within tolerance
-                '''
-                I_rc = 2
-    
-            iterR.append(np.linalg.norm(R))
+        maxU  = np.max(U0)
 
-            if (newton_case == 1):
-                R, F, K       = run.buildNonLinear(U, load_coef)
-            elif (newton_case == 2):
-                R, F, K_temp  = run.buildNonLinear(U, load_coef) #Use original K
+        pTime  = pTime + dt
 
-            normR  = np.linalg.norm(R)
-            normF  = np.linalg.norm(F)
+        print("iteration ", i, ", maxU ", maxU, " time ", pTime)
 
-            print("iteration ", i, ", normD ", normD, " normR ", normR, " normF ", normF )
+        st_b = str(pTime) + '\t' + str(U1[1]) + "\t" + str(U1[505]) + '\n' #Value of u at B
 
-            if (normR/normF < tol) and (I_rc == 2):
-                '''
-                1. increment should be within tolerance
-                '''
-                break
-            elif (normR/normF < tol) and (I_rc != 2):
-                I_rc = 1
-            elif (normR/normF > tol) and (I_rc != 2):
-                I_rc = 3
+        wt_b_file.write(st_b)
 
-        stopTime = time.time()
+    stopTime = time.time()
 
-        u_vs_load[j - 1, 0] = load_coef 
-        u_vs_load[j - 1, 1] = U[LM[900, 1]] #Store u at node 1 of element 900
+    wt_b_file.close()
 
-    wrFile = open('node_u_vs_load_' + str(kappa_case) + '_' + str(newton_case) + '_' + str(inc_case) +'.dat', 'w')
-    st = 'kappa_case ' + str(kappa_case) + ' Newton_method ' + str(newton_case) + ' loading ' + str(inc_case) + '\n' 
-    wrFile.write(st)
-
-    for i in u_vs_load:
-        '''
-        Write u at particular node vs f_0 with each incremental load to file
-        '''
-        st = str(i[0]) + '\t' + str(i[1]) + '\n'
-        wrFile.write(st)
-    wrFile.close()
-
-    wrFile = open('normR_vs_iteration_' + str(kappa_case) + '_' + str(newton_case) + '_' + str(inc_case) +'.dat', 'w')
-    st = 'kappa_case ' + str(kappa_case) + ' Newton_method ' + str(newton_case) + ' loading ' + str(inc_case) + '\n' 
-    st = st  + 'stopTime - startTime ' + str(stopTime - startTime) + '\n'
-    wrFile.write(st)
-
-    for coun, i in enumerate(iterR):
-        '''
-        Write norm of R vs iterations 
-        '''
-        st = str(coun) + '\t' + str(i) + '\n'
-        wrFile.write(st)
-    wrFile.close()
-
+#    postFile                        = 'proj_test.vtk'
     postFile                        = 'ref_proj.vtk'
-    outFile                         = 'post_tri_' +str(kappa_case) + '_' + str(newton_case) + '_' + str(inc_case) + '.vtk'
-
-    U_x, U_y = run.assembleDerivative(U)
-    Kappa    = run.assembleKappa(U)
-
-    resized_U_x  = np.zeros(msh.totalNumEle); resized_U_x[msh.totalNumEle - numEle:]  = U_x
-    resized_U_y  = np.zeros(msh.totalNumEle); resized_U_y[msh.totalNumEle - numEle:]  = U_y
-    resizedKappa = np.zeros(msh.totalNumEle); resizedKappa[msh.totalNumEle - numEle:] = Kappa 
+    outFile                         = 'post_tri_.vtk'
 
     post = Post_process(postFile, outFile, numNodes)
-    post.write(newDOF, U, 'u', dataType = 'Point', writeHeader = True)
-    post.write(newDOF, resized_U_x,  'u_x',   dataType = 'Cell', writeHeader = True)
-    post.write(newDOF, resized_U_y,  'u_y',   dataType = 'Cell', writeHeader = False)
-    post.write(newDOF, resizedKappa, 'kappa', dataType = 'Cell', writeHeader = False)
+    post.write(newDOF, U1, 'u', dataType = 'Point', writeHeader = True)
