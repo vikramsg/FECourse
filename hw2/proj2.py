@@ -161,6 +161,23 @@ class FE:
         self.load_case      = load_case
 
 
+    def buildMStar(self):
+        '''
+        Build Mstar 
+        '''
+        tol   = 10e-8
+        if (np.abs(alpha - 0) > tol):
+            Mstar = np.zeros((self.numDOF, self.numDOF))
+        else:
+            Mstar = np.zeros((self.numDOF))
+
+        for i in range(self.numEle):
+            det_D, k = self.getLocalK(i, U)      #Assemble tangent stiffness matrix
+            self.assembleMStar(i, det_D, U, Mstar)
+
+        return Mstar
+
+
     def buildGTFE(self, U, pTime):
         '''
         Build Mstar and F 
@@ -171,18 +188,11 @@ class FE:
 
         alpha = self.alpha
 
-        tol   = 10e-8
-        if (np.abs(alpha - 0) > tol):
-            Mstar = np.zeros((self.numDOF, self.numDOF))
-        else:
-            Mstar = np.zeros((self.numDOF))
-
         for i in range(self.numEle):
             det_D, k = self.getLocalK(i, U)      #Assemble tangent stiffness matrix
-            self.assembleMStar(i, det_D, U, Mstar)
             self.assembleLoad(i, det_D, U, F)    #Assemble load vector
 
-        return Mstar, F 
+        return F 
 
 
     def assembleDerivative(self, U):
@@ -306,14 +316,14 @@ class FE:
 
     def getGTLoad(self, t, dt):
         '''
-        alpha*F_{n + 1} + (1 - alpha)*F_n
+        dt*(alpha*F_{n + 1} + (1 - alpha)*F_n)
         '''
         alpha = self.alpha
 
         f_np1 = self.getUnsteadyLoad(t + dt)
         f_n   = self.getUnsteadyLoad(t)
 
-        return alpha*f_np1 + (1 - alpha)*f_n
+        return dt*(alpha*f_np1 + (1 - alpha)*f_n)
 
     def getUnsteadyLoad(self, t):
         load_case = self.load_case 
@@ -424,7 +434,7 @@ class FE:
         return kappa
 
 
-    def project(self, fn, U):
+    def project(self, fn, U, init_case):
         '''
         Project a function on the solution vector
         '''
@@ -435,11 +445,14 @@ class FE:
                 x     = self.nodes[i, j, :]
                 jp    = self.LM[i, j]
                 if (jp != -1):
-                    U[jp] = fn(x)
+                    U[jp] = fn(x, init_case)
 
 
-def fn(x):
-    u = 100.0 
+def fn(x, init_case):
+    if init_case == 0:
+        u = 100.0 
+    else:
+        u = 0.0
 
     return u
 
@@ -511,14 +524,10 @@ class Post_process:
 
 
 if __name__=="__main__":
-#    fileName                                    = 'proj_test.msh'
     fileName                                    = 'ref_proj.msh'
     msh                                         = readGMSH(fileName)
     numEle, numNodes, numDOF, nodes, LM, newDOF = msh.getConnectivity()
 
-
-    u_b_file  = "data_at_b_gf.dat" # Write data at point B and a point near GF
-    wt_b_file = open(u_b_file, 'w')
 
     tol    = 1e-8 #Tolerance
 
@@ -532,23 +541,40 @@ if __name__=="__main__":
     1: Unsteady load f = max{0, f_0.sin(2.pi.t/T)}
     '''
 
-    alpha =  1.0 
-    dt    =  1.0
+    alpha =  1.00
+    dt    = 15.00 
     run.problem_param(alpha, dt, load_case) #Set problem parameters
 
     U      = np.zeros((numDOF))    #Solution vector initialized to 0
 
-    run.project(fn, U)
+    init_case = 1
+    '''
+    0: U_0 = 100
+    1: U_0 = 0
+    '''
+    run.project(fn, U, init_case)
 
     startTime = time.time() # To measure time required for convergence
 
     pTime = 0    #Physical time
     U0    = U
-    for i in range(2):
-        Mstar, F = run.buildGTFE(U0, pTime)
+
+    base_name =  "data_at_b_gf"# Write data at point B and a point near GF
+    load_str  =  "_load_case_" + str(load_case) 
+    init_str  =  "_init_case_" + str(init_case) 
+    alph_str  =  "_alpha_" + str(alpha) 
+    u_b_file  = base_name + load_str + init_str + alph_str + '.dat' 
+    wt_b_file = open(u_b_file, 'w')
+       
+    Mstar = run.buildMStar() # Mstar is constant for a given alpha and dt 
+    if (np.abs(alpha - 0) > tol):
+        Minv = np.linalg.inv(Mstar) # Needs to be inverted only once
+
+    for i in range(3000):
+        F = run.buildGTFE(U0, pTime)
 
         if (np.abs(alpha - 0) > tol):
-            U1 = np.linalg.solve(Mstar, F)
+            U1 = np.dot(Minv, F)
         else:
             U1 = F/Mstar
 
@@ -561,16 +587,17 @@ if __name__=="__main__":
         print("iteration ", i, ", maxU ", maxU, " time ", pTime)
 
         st_b = str(pTime) + '\t' + str(U1[1]) + "\t" + str(U1[505]) + '\n' #Value of u at B
-
         wt_b_file.write(st_b)
+
+#        if (i == 5) or (i == 60):
+#            postFile  = 'ref_proj.vtk'
+#            time_str  =  "_time_" + str(i*dt) 
+#            outFile   = 'post_tri'+ load_str + init_str + alph_str + time_str + '.vtk' 
+#            
+#            post = Post_process(postFile, outFile, numNodes)
+#            post.write(newDOF, U1, 'u', dataType = 'Point', writeHeader = True)
 
     stopTime = time.time()
 
     wt_b_file.close()
 
-#    postFile                        = 'proj_test.vtk'
-    postFile                        = 'ref_proj.vtk'
-    outFile                         = 'post_tri_.vtk'
-
-    post = Post_process(postFile, outFile, numNodes)
-    post.write(newDOF, U1, 'u', dataType = 'Point', writeHeader = True)
